@@ -1,6 +1,6 @@
 # Enterprise Network Design — Cisco Packet Tracer
 
-> **VLAN Segmentation · Inter-VLAN Routing · Centralised DHCP/DNS · OSPF Dynamic Routing**
+> **VLAN Segmentation · Inter-VLAN Routing · Centralised DHCP/DNS · OSPF Dynamic Routing · Guest Isolation · Management VLAN**
 
 A hands-on simulation of a two-site enterprise network built in **Cisco Packet Tracer**.
 The project covers every major layer of a real SMB deployment: layer-2 segmentation, layer-3 routing,
@@ -25,12 +25,15 @@ centralised services, and WAN connectivity — all verified with live pings and 
 VLANs isolate department traffic at layer 2.
 Each VLAN maps to a dedicated switch access port and a `/24` subnet.
 
-| VLAN ID | Name   | Subnet            | Switch Port | Gateway      |
-|---------|--------|-------------------|-------------|--------------|
-| 10      | HR     | 192.168.10.0/24   | Fa0/1       | 192.168.10.1 |
-| 20      | SALES  | 192.168.20.0/24   | Fa0/2       | 192.168.20.1 |
-| 30      | IT     | 192.168.30.0/24   | Fa0/3       | 192.168.30.1 |
-| 50      | SERVER | 192.168.50.0/24   | Fa0/4       | 192.168.50.1 |
+| VLAN ID | Name       | Subnet            | Switch Port | Gateway       | Purpose                        |
+|---------|------------|-------------------|-------------|---------------|--------------------------------|
+| 10      | HR         | 192.168.10.0/24   | Fa0/1       | 192.168.10.1  | Human Resources dept           |
+| 20      | SALES      | 192.168.20.0/24   | Fa0/2       | 192.168.20.1  | Sales dept                     |
+| 30      | IT         | 192.168.30.0/24   | Fa0/3       | 192.168.30.1  | IT dept                        |
+| 40      | FINANCE    | 192.168.40.0/24   | Fa0/5       | 192.168.40.1  | Finance dept *(new)*           |
+| 50      | SERVER     | 192.168.50.0/24   | Fa0/4       | 192.168.50.1  | Server farm (DHCP, DNS)        |
+| 70      | GUEST      | 192.168.70.0/24   | Fa0/6       | 192.168.70.1  | Guest Wi-Fi — internet only *(new)* |
+| 99      | MANAGEMENT | 192.168.99.0/24   | Fa0/24      | 192.168.99.1  | Switch/Router management *(new)* |
 
 **Verified with `show vlan brief`:**
 
@@ -39,15 +42,23 @@ Each VLAN maps to a dedicated switch access port and a `/24` subnet.
 ### Switch Access Port Configuration
 
 ```
+! --- Create all VLANs ---
 Switch0(config)# vlan 10
 Switch0(config-vlan)# name HR
 Switch0(config)# vlan 20
 Switch0(config-vlan)# name SALES
 Switch0(config)# vlan 30
 Switch0(config-vlan)# name IT
+Switch0(config)# vlan 40
+Switch0(config-vlan)# name FINANCE
 Switch0(config)# vlan 50
 Switch0(config-vlan)# name SERVER
+Switch0(config)# vlan 70
+Switch0(config-vlan)# name GUEST
+Switch0(config)# vlan 99
+Switch0(config-vlan)# name MANAGEMENT
 
+! --- Assign access ports ---
 Switch0(config)# interface FastEthernet0/1
 Switch0(config-if)# switchport mode access
 Switch0(config-if)# switchport access vlan 10
@@ -63,6 +74,20 @@ Switch0(config-if)# switchport access vlan 30
 Switch0(config)# interface FastEthernet0/4
 Switch0(config-if)# switchport mode access
 Switch0(config-if)# switchport access vlan 50
+
+Switch0(config)# interface FastEthernet0/5
+Switch0(config-if)# switchport mode access
+Switch0(config-if)# switchport access vlan 40
+
+Switch0(config)# interface FastEthernet0/6
+Switch0(config-if)# switchport mode access
+Switch0(config-if)# switchport access vlan 70
+
+! --- Management VLAN on Switch SVI ---
+Switch0(config)# interface Vlan99
+Switch0(config-if)# ip address 192.168.99.2 255.255.255.0
+Switch0(config-if)# no shutdown
+Switch0(config)# ip default-gateway 192.168.99.1
 ```
 
 ### Trunk Uplink to Router1
@@ -97,9 +122,21 @@ Router1(config)# interface GigabitEthernet0/0.30
 Router1(config-subif)# encapsulation dot1Q 30
 Router1(config-subif)# ip address 192.168.30.1 255.255.255.0
 
+Router1(config)# interface GigabitEthernet0/0.40
+Router1(config-subif)# encapsulation dot1Q 40
+Router1(config-subif)# ip address 192.168.40.1 255.255.255.0
+
 Router1(config)# interface GigabitEthernet0/0.50
 Router1(config-subif)# encapsulation dot1Q 50
 Router1(config-subif)# ip address 192.168.50.1 255.255.255.0
+
+Router1(config)# interface GigabitEthernet0/0.70
+Router1(config-subif)# encapsulation dot1Q 70
+Router1(config-subif)# ip address 192.168.70.1 255.255.255.0
+
+Router1(config)# interface GigabitEthernet0/0.99
+Router1(config-subif)# encapsulation dot1Q 99 native
+Router1(config-subif)# ip address 192.168.99.1 255.255.255.0
 ```
 
 ---
@@ -116,7 +153,10 @@ Router1 subinterfaces relay DHCP broadcasts from each VLAN to the server using `
 | HR         | 192.168.10.1    | 192.168.50.10 | 192.168.10.100  | 50        |
 | SALES      | 192.168.20.1    | 192.168.50.10 | 192.168.20.100  | 50        |
 | IT         | 192.168.30.1    | 192.168.50.10 | 192.168.30.100  | 50        |
+| FINANCE    | 192.168.40.1    | 192.168.50.10 | 192.168.40.100  | 50        |
 | serverPool | —               | —             | 192.168.50.0    | 512       |
+| GUEST      | 192.168.70.1    | 8.8.8.8       | 192.168.70.100  | 100       |
+| MANAGEMENT | 192.168.99.1    | 192.168.50.10 | 192.168.99.100  | 20        |
 
 ![DHCP pool configuration on Server0](screenshots/dhcp-config.png)
 
@@ -133,6 +173,67 @@ Router1(config-subif)# ip helper-address 192.168.50.10
 
 Router1(config)# interface GigabitEthernet0/0.30
 Router1(config-subif)# ip helper-address 192.168.50.10
+
+Router1(config)# interface GigabitEthernet0/0.40
+Router1(config-subif)# ip helper-address 192.168.50.10
+
+Router1(config)# interface GigabitEthernet0/0.70
+Router1(config-subif)# ip helper-address 192.168.50.10
+
+Router1(config)# interface GigabitEthernet0/0.99
+Router1(config-subif)# ip helper-address 192.168.50.10
+```
+
+---
+
+## Guest VLAN Isolation — ACL
+
+The **Guest VLAN (70)** must be isolated from all internal VLANs.
+Guests should only reach the internet (simulated via Server0's default route), not internal servers.
+
+```
+! Block Guest from accessing any internal subnet
+Router1(config)# ip access-list extended GUEST_RESTRICT
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.10.0 0.0.0.255
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.20.0 0.0.0.255
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.30.0 0.0.0.255
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.40.0 0.0.0.255
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.50.0 0.0.0.255
+Router1(config-ext-nacl)# deny ip 192.168.70.0 0.0.0.255 192.168.99.0 0.0.0.255
+Router1(config-ext-nacl)# permit ip any any
+
+! Apply ACL inbound on the Guest subinterface
+Router1(config)# interface GigabitEthernet0/0.70
+Router1(config-subif)# ip access-group GUEST_RESTRICT in
+```
+
+> ✅ This ensures guests get DHCP and can browse the internet but **cannot reach HR, Sales, IT, Finance, or Server data**.
+
+---
+
+## Management VLAN 99 — Out-of-Band Access
+
+VLAN 99 is used exclusively for **SSH management** of Switch0 and Router1.
+No user PCs belong to this VLAN.
+
+```
+! Enable SSH on Switch0 for management access
+Switch0(config)# ip domain-name company.local
+Switch0(config)# crypto key generate rsa modulus 1024
+Switch0(config)# ip ssh version 2
+Switch0(config)# username admin privilege 15 secret Cisco123!
+Switch0(config)# line vty 0 4
+Switch0(config-line)# transport input ssh
+Switch0(config-line)# login local
+
+! Enable SSH on Router1
+Router1(config)# ip domain-name company.local
+Router1(config)# crypto key generate rsa modulus 1024
+Router1(config)# ip ssh version 2
+Router1(config)# username admin privilege 15 secret Cisco123!
+Router1(config)# line vty 0 4
+Router1(config-line)# transport input ssh
+Router1(config-line)# login local
 ```
 
 ---
@@ -221,20 +322,26 @@ Router2 achieved **FULL/DR** state — LSA exchange is complete and the adjacenc
 
 ## Complete IP Addressing Table
 
-| Device      | Interface    | IP Address    | Role                 |
-|-------------|--------------|---------------|----------------------|
-| Router1     | G0/0.10      | 192.168.10.1  | HR VLAN gateway      |
-| Router1     | G0/0.20      | 192.168.20.1  | SALES VLAN gateway   |
-| Router1     | G0/0.30      | 192.168.30.1  | IT VLAN gateway      |
-| Router1     | G0/0.50      | 192.168.50.1  | SERVER VLAN gateway  |
-| Router1     | G0/1         | 10.0.0.1      | WAN to Router2       |
-| Router2     | G0/0         | 10.0.0.2      | WAN to Router1       |
-| Router2     | G0/1         | 192.168.60.1  | Branch LAN gateway   |
-| Server0     | FastEthernet0 | 192.168.50.10 | DHCP + DNS server   |
-| PC1 (HR)    | NIC          | 192.168.10.100+ | DHCP assigned      |
-| PC2 (SALES) | NIC          | 192.168.20.100+ | DHCP assigned      |
-| PC3 (IT)    | NIC          | 192.168.30.100+ | DHCP assigned      |
-| PC-Branch   | NIC          | 192.168.60.10 | Static               |
+| Device           | Interface     | IP Address      | Role                        |
+|------------------|---------------|-----------------|-----------------------------|
+| Router1          | G0/0.10       | 192.168.10.1    | HR VLAN gateway             |
+| Router1          | G0/0.20       | 192.168.20.1    | SALES VLAN gateway          |
+| Router1          | G0/0.30       | 192.168.30.1    | IT VLAN gateway             |
+| Router1          | G0/0.40       | 192.168.40.1    | FINANCE VLAN gateway *(new)*|
+| Router1          | G0/0.50       | 192.168.50.1    | SERVER VLAN gateway         |
+| Router1          | G0/0.70       | 192.168.70.1    | GUEST VLAN gateway *(new)*  |
+| Router1          | G0/0.99       | 192.168.99.1    | MGMT VLAN gateway *(new)*   |
+| Router1          | G0/1          | 10.0.0.1        | WAN to Router2              |
+| Router2          | G0/0          | 10.0.0.2        | WAN to Router1              |
+| Router2          | G0/1          | 192.168.60.1    | Branch LAN gateway          |
+| Server0          | FastEthernet0 | 192.168.50.10   | DHCP + DNS server           |
+| Switch0 SVI      | Vlan99        | 192.168.99.2    | Switch management *(new)*   |
+| PC1 (HR)         | NIC           | 192.168.10.100+ | DHCP assigned               |
+| PC2 (SALES)      | NIC           | 192.168.20.100+ | DHCP assigned               |
+| PC3 (IT)         | NIC           | 192.168.30.100+ | DHCP assigned               |
+| PC4 (Finance)    | NIC           | 192.168.40.100+ | DHCP assigned *(new)*       |
+| PC5 (Guest)      | NIC           | 192.168.70.100+ | DHCP assigned *(new)*       |
+| PC-Branch        | NIC           | 192.168.60.10   | Static                      |
 
 ---
 
@@ -286,6 +393,8 @@ Any HQ VLAN client that receives an IP via DHCP inherits `192.168.50.10` as its 
 | **DHCP Server** | Centralised IP assignment | Packet Tracer Server GUI → DHCP tab |
 | **DNS** | Internal hostname resolution | Packet Tracer Server GUI → DNS tab |
 | **OSPF** | Dynamic WAN routing (Area 0) | `router ospf 1`, `network <subnet> <wildcard> area 0` |
+| **Extended ACL** | Guest VLAN isolation | `ip access-list extended`, `ip access-group ... in` |
+| **Management VLAN** | Secure SSH access to devices | `interface Vlan99`, `ip ssh version 2` |
 | **Verification** | Check routing table / OSPF state | `show ip route`, `show ip ospf neighbor`, `show vlan brief` |
 
 ---
@@ -306,6 +415,9 @@ Any HQ VLAN client that receives an IP via DHCP inherits `192.168.50.10` as its 
 | PCs in the same VLAN can't ping each other | Access port not assigned to correct VLAN | `switchport access vlan <id>` on the port |
 | Inter-VLAN ping fails | Trunk misconfigured or subinterface missing | Run `show interfaces trunk` on Switch0 |
 | DHCP address not assigned | `ip helper-address` missing on subinterface | Add `ip helper-address 192.168.50.10` to each VLAN subinterface |
+| Finance VLAN (40) gets no DHCP | FINANCE pool missing on Server0 | Add pool with gateway 192.168.40.1, start 192.168.40.100 |
+| Guest can ping internal servers | ACL not applied or direction wrong | Apply `GUEST_RESTRICT` ACL **inbound** on G0/0.70 |
+| Cannot SSH to Switch0 | Management VLAN SVI down or no SSH key | Check `show ip ssh`, generate RSA key, set `transport input ssh` |
 | OSPF neighbour stuck in INIT/2-WAY | Mismatched hello/dead timers or area IDs | Check `show ip ospf interface` on both routers |
 | Branch PC unreachable from HQ | OSPF not advertising the branch subnet | Verify `network 192.168.60.0 0.0.0.255 area 0` on Router2 |
 | DNS resolution fails | Client not using 192.168.50.10 as DNS | Verify DHCP pool DNS Server field = `192.168.50.10` |
